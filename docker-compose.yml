@@ -1,0 +1,13 @@
+services:
+  pluma:
+    build: .
+    container_name: pluma
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+    env_file:
+      - .env
+    environment:
+      - CONFIG_PATH=/config.yaml
