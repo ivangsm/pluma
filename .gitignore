@@ -1,6 +1,6 @@
 # Binaries
-pluma
-tgo
+/pluma
+/tgo
 
 # Config with secrets
 .env
