@@ -22,6 +22,8 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Binary
 COPY --from=builder /pluma /pluma
+COPY config.yaml /config.yaml
+
 
 # Default config path
 ENV CONFIG_PATH=/config.yaml
