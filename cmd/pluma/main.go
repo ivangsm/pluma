@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,18 +20,23 @@ func main() {
 		configPath = "/config.yaml"
 	}
 
-	log.Printf("Pluma starting — loading config from %s", configPath)
+	slog.Info("Pluma starting", "config", configPath)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		slog.Error("Failed to load config", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Loaded %d route(s), listening on :%d", len(cfg.Routes), cfg.Server.Port)
+	slog.Info("Routes loaded", "routes", len(cfg.Routes), "port", cfg.Server.Port)
 
-	srv, err := server.New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv, err := server.New(ctx, cfg)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		slog.Error("Failed to create server", "error", err)
+		os.Exit(1)
 	}
 
 	httpServer := &http.Server{
@@ -47,21 +52,23 @@ func main() {
 
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			slog.Error("Server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
-	log.Printf("Pluma ready ✓")
+	slog.Info("Pluma ready")
 
 	<-done
-	log.Println("Shutting down...")
+	slog.Info("Shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
 
-	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Fatalf("Shutdown error: %v", err)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		slog.Error("Shutdown error", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Goodbye.")
+	slog.Info("Goodbye.")
 }

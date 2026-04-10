@@ -65,6 +65,10 @@ func escapeHTML(s string) string {
 			result = append(result, []byte("&lt;")...)
 		case '>':
 			result = append(result, []byte("&gt;")...)
+		case '"':
+			result = append(result, []byte("&quot;")...)
+		case '\'':
+			result = append(result, []byte("&#39;")...)
 		default:
 			result = append(result, s[i])
 		}

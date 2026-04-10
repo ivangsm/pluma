@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"strings"
 )
 
 // ContactRequest is the expected JSON body for contact endpoints.
@@ -32,19 +33,18 @@ type SuccessResponse struct {
 }
 
 // GetClientIP extracts the real client IP from the request,
-// respecting X-Forwarded-For and X-Real-IP headers.
-func GetClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
+// respecting X-Forwarded-For and X-Real-IP headers only when trustProxy is true.
+func GetClientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if i := strings.IndexByte(xff, ','); i > 0 {
+				return strings.TrimSpace(xff[:i])
 			}
+			return strings.TrimSpace(xff)
 		}
-		return xff
-	}
-
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			return strings.TrimSpace(xri)
+		}
 	}
 
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)

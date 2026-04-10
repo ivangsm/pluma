@@ -10,6 +10,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	DefaultPort      = 8080
+	DefaultRateLimit = "1/m"
+)
+
 // Config holds the entire application configuration.
 type Config struct {
 	Server ServerConfig `yaml:"server"`
@@ -18,9 +23,11 @@ type Config struct {
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Port           int    `yaml:"port"`
-	RateLimit      string `yaml:"rate_limit"`
-	AllowedOrigins string `yaml:"allowed_origins"`
+	Port           int             `yaml:"port"`
+	RateLimit      string          `yaml:"rate_limit"`
+	AllowedOrigins string          `yaml:"allowed_origins"`
+	TrustProxy     bool            `yaml:"trust_proxy"`
+	ParsedOrigins  map[string]bool `yaml:"-"`
 }
 
 // Route maps a URL path to a Telegram bot and chat.
@@ -48,13 +55,10 @@ func Load(path string) (*Config, error) {
 
 	// Defaults
 	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
+		cfg.Server.Port = DefaultPort
 	}
 	if cfg.Server.RateLimit == "" {
-		cfg.Server.RateLimit = "1/m"
-	}
-	if cfg.Server.AllowedOrigins == "" {
-		cfg.Server.AllowedOrigins = "*"
+		cfg.Server.RateLimit = DefaultRateLimit
 	}
 
 	// Validate routes
@@ -77,7 +81,27 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("at least one route is required")
 	}
 
+	cfg.Server.ParsedOrigins = make(map[string]bool)
+	if cfg.Server.AllowedOrigins != "" && cfg.Server.AllowedOrigins != "*" {
+		for _, o := range strings.Split(cfg.Server.AllowedOrigins, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				cfg.Server.ParsedOrigins[trimmed] = true
+			}
+		}
+	}
+
 	return &cfg, nil
+}
+
+// ValidateEmail performs basic email format validation.
+func ValidateEmail(email string) bool {
+	at := strings.IndexByte(email, '@')
+	if at < 1 {
+		return false
+	}
+	domain := email[at+1:]
+	dot := strings.IndexByte(domain, '.')
+	return dot > 0 && dot < len(domain)-1
 }
 
 // ParseRateLimit parses "N/m" or "N/h" into a duration between allowed requests.

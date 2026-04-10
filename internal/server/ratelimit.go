@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -12,11 +13,11 @@ type RateLimiter struct {
 }
 
 // NewRateLimiter creates a rate limiter with automatic cleanup of stale entries.
-func NewRateLimiter() *RateLimiter {
+func NewRateLimiter(ctx context.Context) *RateLimiter {
 	rl := &RateLimiter{
 		requests: make(map[string]time.Time),
 	}
-	go rl.cleanupLoop()
+	go rl.cleanupLoop(ctx)
 	return rl
 }
 
@@ -34,17 +35,22 @@ func (rl *RateLimiter) Allow(ip, path string, window time.Duration) bool {
 	return false
 }
 
-func (rl *RateLimiter) cleanupLoop() {
+func (rl *RateLimiter) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		cutoff := time.Now().Add(-1 * time.Hour)
-		for k, v := range rl.requests {
-			if v.Before(cutoff) {
-				delete(rl.requests, k)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			cutoff := time.Now().Add(-1 * time.Hour)
+			for k, v := range rl.requests {
+				if v.Before(cutoff) {
+					delete(rl.requests, k)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }

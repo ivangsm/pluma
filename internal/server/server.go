@@ -1,11 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/ivangsm/pluma/internal/config"
@@ -20,10 +20,10 @@ type Server struct {
 }
 
 // New creates a Server and registers all routes from config.
-func New(cfg *config.Config) (*Server, error) {
+func New(ctx context.Context, cfg *config.Config) (*Server, error) {
 	s := &Server{
 		cfg:     cfg,
-		limiter: NewRateLimiter(),
+		limiter: NewRateLimiter(ctx),
 		mux:     http.NewServeMux(),
 	}
 
@@ -36,8 +36,7 @@ func New(cfg *config.Config) (*Server, error) {
 			return nil, fmt.Errorf("route %s: %w", r.Path, err)
 		}
 		s.mux.HandleFunc("POST "+r.Path, s.contactHandler(r, window))
-		log.Printf("Registered route: POST %s → bot:%s…%s chat:%s",
-			r.Path, r.BotToken[:6], r.BotToken[len(r.BotToken)-4:], r.ChatID)
+		slog.Info("route registered", "method", "POST", "path", r.Path)
 	}
 
 	return s, nil
@@ -70,12 +69,7 @@ func (s *Server) isOriginAllowed(origin string) bool {
 	if s.cfg.Server.AllowedOrigins == "*" {
 		return true
 	}
-	for _, o := range strings.Split(s.cfg.Server.AllowedOrigins, ",") {
-		if strings.TrimSpace(o) == origin {
-			return true
-		}
-	}
-	return false
+	return s.cfg.Server.ParsedOrigins[origin]
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -87,20 +81,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) contactHandler(route config.Route, window time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ip := GetClientIP(r)
+		ip := GetClientIP(r, s.cfg.Server.TrustProxy)
 
 		// Rate limit check
 		if !s.limiter.Allow(ip, route.Path, window) {
 			JSON(w, http.StatusTooManyRequests, ErrorResponse{
 				Error: "Rate limit exceeded. Please try again later.",
 			})
-			log.Printf("[429] %s %s from %s", r.Method, route.Path, ip)
+			slog.Warn("rate limited", "method", r.Method, "path", route.Path, "ip", ip)
 			return
 		}
 
 		// Parse request body
 		var req ContactRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			JSON(w, http.StatusBadRequest, ErrorResponse{
 				Error: "Invalid request body. Expected JSON with name, email, and message.",
 			})
@@ -115,23 +109,30 @@ func (s *Server) contactHandler(route config.Route, window time.Duration) http.H
 			return
 		}
 
+		if !config.ValidateEmail(req.Email) {
+			JSON(w, http.StatusBadRequest, ErrorResponse{
+				Error: "Invalid email address.",
+			})
+			return
+		}
+
 		// Send to Telegram
 		if err := telegram.SendMessage(route.BotToken, route.ChatID, req.Name, req.Email, req.Message, req.Source); err != nil {
 			JSON(w, http.StatusInternalServerError, ErrorResponse{
 				Error: "Failed to send message. Please try again later.",
 			})
-			log.Printf("[500] %s %s from %s: %v", r.Method, route.Path, ip, err)
+			slog.Error("telegram send failed", "method", r.Method, "path", route.Path, "ip", ip, "error", err)
 			return
 		}
 
 		JSON(w, http.StatusOK, SuccessResponse{
 			Status: "Message sent successfully.",
 		})
-		log.Printf("[200] %s %s from %s", r.Method, route.Path, ip)
+		slog.Info("message sent", "method", r.Method, "path", route.Path, "ip", ip)
 	}
 }
 
-func decodeJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
 	return json.NewDecoder(r.Body).Decode(v)
 }
