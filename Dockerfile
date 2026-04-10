@@ -20,7 +20,7 @@ RUN upx --best --lzma /pluma
 # ── Final stage (scratch = 0 bytes base) ────────────────────
 FROM scratch
 
-# TLS certificates for HTTPS calls to Telegram API
+# TLS certificates for HTTPS calls to external APIs
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Binary

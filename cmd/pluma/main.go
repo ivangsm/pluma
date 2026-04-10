@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/ivangsm/pluma/internal/config"
+	"github.com/ivangsm/pluma/internal/discord"
+	"github.com/ivangsm/pluma/internal/provider"
 	"github.com/ivangsm/pluma/internal/server"
+	"github.com/ivangsm/pluma/internal/telegram"
 )
 
 func main() {
@@ -28,12 +31,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	providers, err := buildProviders(cfg)
+	if err != nil {
+		slog.Error("Failed to build providers", "error", err)
+		os.Exit(1)
+	}
+
 	slog.Info("Routes loaded", "routes", len(cfg.Routes), "port", cfg.Server.Port)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv, err := server.New(ctx, cfg)
+	srv, err := server.New(ctx, cfg, providers)
 	if err != nil {
 		slog.Error("Failed to create server", "error", err)
 		os.Exit(1)
@@ -71,4 +80,26 @@ func main() {
 	}
 
 	slog.Info("Goodbye.")
+}
+
+func buildProviders(cfg *config.Config) (map[string]provider.Provider, error) {
+	providers := make(map[string]provider.Provider, len(cfg.Routes))
+
+	for _, route := range cfg.Routes {
+		switch route.Provider {
+		case "telegram":
+			providers[route.Path] = &telegram.Telegram{
+				BotToken: route.Telegram.BotToken,
+				ChatID:   route.Telegram.ChatID,
+			}
+		case "discord":
+			providers[route.Path] = &discord.Discord{
+				WebhookURL: route.Discord.WebhookURL,
+			}
+		default:
+			return nil, fmt.Errorf("unknown provider %q for route %s", route.Provider, route.Path)
+		}
+	}
+
+	return providers, nil
 }

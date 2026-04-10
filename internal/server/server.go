@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ivangsm/pluma/internal/config"
-	"github.com/ivangsm/pluma/internal/telegram"
+	"github.com/ivangsm/pluma/internal/provider"
 )
 
 // Server is the main HTTP server that handles contact routes.
@@ -20,7 +20,8 @@ type Server struct {
 }
 
 // New creates a Server and registers all routes from config.
-func New(ctx context.Context, cfg *config.Config) (*Server, error) {
+// The providers map must contain a provider.Provider for each route path.
+func New(ctx context.Context, cfg *config.Config, providers map[string]provider.Provider) (*Server, error) {
 	s := &Server{
 		cfg:     cfg,
 		limiter: NewRateLimiter(ctx),
@@ -31,12 +32,16 @@ func New(ctx context.Context, cfg *config.Config) (*Server, error) {
 
 	for _, route := range cfg.Routes {
 		r := route
+		p, ok := providers[r.Path]
+		if !ok {
+			return nil, fmt.Errorf("no provider registered for route %s", r.Path)
+		}
 		window, err := config.ParseRateLimit(r.RateLimit)
 		if err != nil {
 			return nil, fmt.Errorf("route %s: %w", r.Path, err)
 		}
-		s.mux.HandleFunc("POST "+r.Path, s.contactHandler(r, window))
-		slog.Info("route registered", "method", "POST", "path", r.Path)
+		s.mux.HandleFunc("POST "+r.Path, s.contactHandler(r, p, window))
+		slog.Info("route registered", "method", "POST", "path", r.Path, "provider", r.Provider)
 	}
 
 	return s, nil
@@ -79,7 +84,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) contactHandler(route config.Route, window time.Duration) http.HandlerFunc {
+func (s *Server) contactHandler(route config.Route, p provider.Provider, window time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := GetClientIP(r, s.cfg.Server.TrustProxy)
 
@@ -116,19 +121,25 @@ func (s *Server) contactHandler(route config.Route, window time.Duration) http.H
 			return
 		}
 
-		// Send to Telegram
-		if err := telegram.SendMessage(route.BotToken, route.ChatID, req.Name, req.Email, req.Message, req.Source); err != nil {
+		// Send via provider
+		msg := provider.ContactMessage{
+			Name:    req.Name,
+			Email:   req.Email,
+			Message: req.Message,
+			Source:  req.Source,
+		}
+		if err := p.Send(r.Context(), msg); err != nil {
 			JSON(w, http.StatusInternalServerError, ErrorResponse{
 				Error: "Failed to send message. Please try again later.",
 			})
-			slog.Error("telegram send failed", "method", r.Method, "path", route.Path, "ip", ip, "error", err)
+			slog.Error("send failed", "method", r.Method, "path", route.Path, "provider", route.Provider, "ip", ip, "error", err)
 			return
 		}
 
 		JSON(w, http.StatusOK, SuccessResponse{
 			Status: "Message sent successfully.",
 		})
-		slog.Info("message sent", "method", r.Method, "path", route.Path, "ip", ip)
+		slog.Info("message sent", "method", r.Method, "path", route.Path, "provider", route.Provider, "ip", ip)
 	}
 }
 

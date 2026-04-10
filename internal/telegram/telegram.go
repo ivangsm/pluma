@@ -1,11 +1,14 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/ivangsm/pluma/internal/provider"
 )
 
 var client = &http.Client{Timeout: 10 * time.Second}
@@ -15,26 +18,32 @@ type response struct {
 	Description string `json:"description,omitempty"`
 }
 
-// SendMessage sends a formatted contact message via the Telegram Bot API.
-func SendMessage(botToken, chatID, name, email, message, source string) error {
+// Telegram sends contact messages via the Telegram Bot API.
+type Telegram struct {
+	BotToken string
+	ChatID   string
+}
+
+// Send implements provider.Provider.
+func (t *Telegram) Send(_ context.Context, msg provider.ContactMessage) error {
 	text := fmt.Sprintf(
 		"📩 <b>New Contact Message</b>\n\n"+
 			"<b>Name:</b> %s\n"+
 			"<b>Email:</b> %s\n\n"+
 			"<b>Message:</b>\n%s",
-		escapeHTML(name),
-		escapeHTML(email),
-		escapeHTML(message),
+		escapeHTML(msg.Name),
+		escapeHTML(msg.Email),
+		escapeHTML(msg.Message),
 	)
 
-	if source != "" {
-		text += fmt.Sprintf("\n\n🌐 <b>Source:</b> %s", escapeHTML(source))
+	if msg.Source != "" {
+		text += fmt.Sprintf("\n\n🌐 <b>Source:</b> %s", escapeHTML(msg.Source))
 	}
 
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", t.BotToken)
 
 	resp, err := client.PostForm(apiURL, url.Values{
-		"chat_id":    {chatID},
+		"chat_id":    {t.ChatID},
 		"text":       {text},
 		"parse_mode": {"HTML"},
 	})

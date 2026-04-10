@@ -113,29 +113,34 @@ func TestValidateEmail(t *testing.T) {
 	})
 }
 
+func writeTemp(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp("", "pluma-config-*.yaml")
+	if err != nil {
+		t.Fatalf("creating temp file: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(f.Name()) })
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("writing temp file: %v", err)
+	}
+	f.Close()
+	return f.Name()
+}
+
 func TestLoad(t *testing.T) {
-	t.Run("valid config", func(t *testing.T) {
-		content := `
+	t.Run("valid telegram config", func(t *testing.T) {
+		path := writeTemp(t, `
 server:
   port: 9090
   rate_limit: "3/m"
 routes:
   - path: /contact
-    bot_token: "token123"
-    chat_id: "456"
-`
-		f, err := os.CreateTemp("", "pluma-config-*.yaml")
-		if err != nil {
-			t.Fatalf("creating temp file: %v", err)
-		}
-		defer os.Remove(f.Name())
-
-		if _, err := f.WriteString(content); err != nil {
-			t.Fatalf("writing temp file: %v", err)
-		}
-		f.Close()
-
-		cfg, err := Load(f.Name())
+    provider: telegram
+    telegram:
+      bot_token: "token123"
+      chat_id: "456"
+`)
+		cfg, err := Load(path)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -148,66 +153,138 @@ routes:
 		if len(cfg.Routes) != 1 {
 			t.Fatalf("expected 1 route, got %d", len(cfg.Routes))
 		}
+		if cfg.Routes[0].Provider != "telegram" {
+			t.Fatalf("expected provider 'telegram', got %q", cfg.Routes[0].Provider)
+		}
+	})
+
+	t.Run("valid discord config", func(t *testing.T) {
+		path := writeTemp(t, `
+routes:
+  - path: /contact
+    provider: discord
+    discord:
+      webhook_url: "https://discord.com/api/webhooks/123/abc"
+`)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Routes[0].Provider != "discord" {
+			t.Fatalf("expected provider 'discord', got %q", cfg.Routes[0].Provider)
+		}
+		if cfg.Routes[0].Discord.WebhookURL != "https://discord.com/api/webhooks/123/abc" {
+			t.Fatalf("unexpected webhook_url: %q", cfg.Routes[0].Discord.WebhookURL)
+		}
 	})
 
 	t.Run("missing routes", func(t *testing.T) {
-		content := `
+		path := writeTemp(t, `
 server:
   port: 8080
-`
-		f, err := os.CreateTemp("", "pluma-config-*.yaml")
-		if err != nil {
-			t.Fatalf("creating temp file: %v", err)
-		}
-		defer os.Remove(f.Name())
-
-		f.WriteString(content)
-		f.Close()
-
-		_, err = Load(f.Name())
+`)
+		_, err := Load(path)
 		if err == nil {
 			t.Fatal("expected error for missing routes")
 		}
 	})
 
-	t.Run("missing bot_token", func(t *testing.T) {
-		content := `
+	t.Run("missing provider", func(t *testing.T) {
+		path := writeTemp(t, `
 routes:
   - path: /contact
-    chat_id: "456"
-`
-		f, err := os.CreateTemp("", "pluma-config-*.yaml")
-		if err != nil {
-			t.Fatalf("creating temp file: %v", err)
+    telegram:
+      bot_token: "tok"
+      chat_id: "123"
+`)
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("expected error for missing provider")
 		}
-		defer os.Remove(f.Name())
+	})
 
-		f.WriteString(content)
-		f.Close()
+	t.Run("unknown provider", func(t *testing.T) {
+		path := writeTemp(t, `
+routes:
+  - path: /contact
+    provider: slack
+`)
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("expected error for unknown provider")
+		}
+	})
 
-		_, err = Load(f.Name())
+	t.Run("missing telegram bot_token", func(t *testing.T) {
+		path := writeTemp(t, `
+routes:
+  - path: /contact
+    provider: telegram
+    telegram:
+      chat_id: "456"
+`)
+		_, err := Load(path)
 		if err == nil {
 			t.Fatal("expected error for missing bot_token")
 		}
 	})
 
-	t.Run("defaults applied", func(t *testing.T) {
-		content := `
+	t.Run("missing discord webhook_url", func(t *testing.T) {
+		path := writeTemp(t, `
 routes:
   - path: /contact
-    bot_token: "tok"
-    chat_id: "123"
-`
-		f, err := os.CreateTemp("", "pluma-config-*.yaml")
-		if err != nil {
-			t.Fatalf("creating temp file: %v", err)
+    provider: discord
+    discord:
+      webhook_url: ""
+`)
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("expected error for missing webhook_url")
 		}
-		defer os.Remove(f.Name())
+	})
 
-		f.WriteString(content)
-		f.Close()
+	t.Run("legacy format migrates to telegram", func(t *testing.T) {
+		path := writeTemp(t, `
+server:
+  port: 9090
+  rate_limit: "3/m"
+routes:
+  - path: /contact
+    bot_token: "token123"
+    chat_id: "456"
+`)
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		r := cfg.Routes[0]
+		if r.Provider != "telegram" {
+			t.Fatalf("expected provider 'telegram', got %q", r.Provider)
+		}
+		if r.Telegram == nil {
+			t.Fatal("expected telegram config to be set")
+		}
+		if r.Telegram.BotToken != "token123" {
+			t.Fatalf("expected bot_token 'token123', got %q", r.Telegram.BotToken)
+		}
+		if r.Telegram.ChatID != "456" {
+			t.Fatalf("expected chat_id '456', got %q", r.Telegram.ChatID)
+		}
+		if r.BotToken != "" || r.ChatID != "" {
+			t.Fatal("expected legacy fields to be cleared after migration")
+		}
+	})
 
-		cfg, err := Load(f.Name())
+	t.Run("defaults applied", func(t *testing.T) {
+		path := writeTemp(t, `
+routes:
+  - path: /contact
+    provider: telegram
+    telegram:
+      bot_token: "tok"
+      chat_id: "123"
+`)
+		cfg, err := Load(path)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

@@ -1,11 +1,12 @@
 # Pluma 🪶
 
-Ultra-lightweight Telegram contact API. Supports **multiple bots** and **multiple chats** via a single YAML config — no database required.
+Ultra-lightweight contact form API. Route messages to **Telegram**, **Discord**, or both — via a single YAML config. No database required.
 
 ## Features
 
 - 🪶 **Tiny** — ~3MB Docker image (scratch + UPX)
-- 🤖 **Multi-bot** — N bots × N chats from one instance
+- 🔌 **Multi-provider** — Telegram, Discord (easily extensible)
+- 🤖 **Multi-route** — N providers × N destinations from one instance
 - 🛡️ **Rate limiting** — Per IP, per route, in-memory
 - 🐳 **Docker-first** — Scratch-based, production-ready
 
@@ -47,12 +48,15 @@ server:
 
 routes:
   - path: "/contact/website"
-    bot_token: "${WEBSITE_BOT_TOKEN}"
-    chat_id: "${WEBSITE_CHAT_ID}"
+    provider: telegram
+    telegram:
+      bot_token: "${WEBSITE_BOT_TOKEN}"
+      chat_id: "${WEBSITE_CHAT_ID}"
 
-  - path: "/contact/app"
-    bot_token: "${APP_BOT_TOKEN}"
-    chat_id: "${APP_CHAT_ID}"
+  - path: "/contact/discord"
+    provider: discord
+    discord:
+      webhook_url: "${DISCORD_WEBHOOK_URL}"
     rate_limit: "5/h"     # Override per route
 ```
 
@@ -61,9 +65,21 @@ routes:
 | `server.port` | No | HTTP port (default: `8080`) |
 | `server.rate_limit` | No | Global rate limit (default: `1/m`) |
 | `routes[].path` | Yes | URL path for this contact endpoint |
-| `routes[].bot_token` | Yes | Telegram Bot API token (supports `${ENV}`) |
-| `routes[].chat_id` | Yes | Telegram chat/group ID (supports `${ENV}`) |
+| `routes[].provider` | Yes | Provider name: `telegram` or `discord` |
 | `routes[].rate_limit` | No | Override global rate limit |
+
+**Telegram config:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `telegram.bot_token` | Yes | Telegram Bot API token (supports `${ENV}`) |
+| `telegram.chat_id` | Yes | Telegram chat/group ID (supports `${ENV}`) |
+
+**Discord config:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `discord.webhook_url` | Yes | Discord webhook URL (supports `${ENV}`) |
 
 Rate limit format: `N/m` (per minute) or `N/h` (per hour).
 
@@ -86,7 +102,7 @@ Rate limit format: `N/m` (per minute) or `N/h` (per hour).
 | `name` | Yes | Sender's name |
 | `email` | Yes | Sender's email |
 | `message` | Yes | Message body |
-| `source` | No | Identifier for the origin site/page (shown in the Telegram message) |
+| `source` | No | Identifier for the origin site/page |
 
 **Responses:**
 
@@ -95,7 +111,7 @@ Rate limit format: `N/m` (per minute) or `N/h` (per hour).
 | `200` | Message sent successfully |
 | `400` | Invalid request body or missing fields |
 | `429` | Rate limit exceeded |
-| `500` | Server or Telegram API error |
+| `500` | Server or provider API error |
 
 ### `GET /health`
 
@@ -106,8 +122,9 @@ Returns server status and route count.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONFIG_PATH` | `/config.yaml` | Path to configuration file |
-| `*_BOT_TOKEN` | — | Bot tokens referenced in config.yaml |
-| `*_CHAT_ID` | — | Chat IDs referenced in config.yaml |
+| `*_BOT_TOKEN` | — | Telegram bot tokens referenced in config |
+| `*_CHAT_ID` | — | Telegram chat IDs referenced in config |
+| `*_WEBHOOK_URL` | — | Discord webhook URLs referenced in config |
 
 ## Development
 

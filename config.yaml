@@ -1,5 +1,5 @@
 # ============================================================
-# Pluma – Contact API for Telegram
+# Pluma – Contact Form API
 # Example configuration file
 # ============================================================
 # Copy this file to config.yaml and update with your values.
@@ -7,6 +7,8 @@
 # Secrets support ${ENV_VAR} interpolation:
 #   bot_token: "${MY_BOT_TOKEN}"
 # The value will be resolved from the environment at startup.
+#
+# Supported providers: telegram, discord
 
 server:
   port: 8080
@@ -15,15 +17,25 @@ server:
   allowed_origins: "${ALLOWED_ORIGINS}"
 
 routes:
-  # Each route maps a URL path to a Telegram bot + chat.
+  # Each route maps a URL path to a messaging provider.
   # You can define as many routes as you need.
 
   - path: "/contact/gomb"
-    bot_token: "${GOMB_BOT_TOKEN}"
-    chat_id: "${GOMB_CHAT_ID}"
+    provider: telegram
+    telegram:
+      bot_token: "${GOMB_BOT_TOKEN}"
+      chat_id: "${GOMB_CHAT_ID}"
     # rate_limit: "2/m"   # Optional: override the global rate limit
 
   - path: "/contact/web"
-    bot_token: "${WEB_BOT_TOKEN}"
-    chat_id: "${WEB_CHAT_ID}"
+    provider: telegram
+    telegram:
+      bot_token: "${WEB_BOT_TOKEN}"
+      chat_id: "${WEB_CHAT_ID}"
     # rate_limit: "5/h"     # This route allows 5 requests per hour per IP
+
+  # Discord example:
+  # - path: "/contact/discord"
+  #   provider: discord
+  #   discord:
+  #     webhook_url: "${DISCORD_WEBHOOK_URL}"

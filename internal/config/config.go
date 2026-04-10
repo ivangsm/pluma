@@ -30,12 +30,29 @@ type ServerConfig struct {
 	ParsedOrigins  map[string]bool `yaml:"-"`
 }
 
-// Route maps a URL path to a Telegram bot and chat.
+// Route maps a URL path to a messaging provider.
 type Route struct {
-	Path      string `yaml:"path"`
-	BotToken  string `yaml:"bot_token"`
-	ChatID    string `yaml:"chat_id"`
-	RateLimit string `yaml:"rate_limit"`
+	Path      string          `yaml:"path"`
+	Provider  string          `yaml:"provider"`
+	RateLimit string          `yaml:"rate_limit"`
+	Telegram  *TelegramConfig `yaml:"telegram,omitempty"`
+	Discord   *DiscordConfig  `yaml:"discord,omitempty"`
+
+	// Legacy fields — kept for backward compatibility with v1 configs.
+	// If provider is empty and these are set, they are migrated to Telegram.
+	BotToken string `yaml:"bot_token,omitempty"`
+	ChatID   string `yaml:"chat_id,omitempty"`
+}
+
+// TelegramConfig holds Telegram-specific settings.
+type TelegramConfig struct {
+	BotToken string `yaml:"bot_token"`
+	ChatID   string `yaml:"chat_id"`
+}
+
+// DiscordConfig holds Discord-specific settings.
+type DiscordConfig struct {
+	WebhookURL string `yaml:"webhook_url"`
 }
 
 // Load reads and parses a YAML config file.
@@ -61,17 +78,50 @@ func Load(path string) (*Config, error) {
 		cfg.Server.RateLimit = DefaultRateLimit
 	}
 
-	// Validate routes
+	// Migrate and validate routes
 	for i, r := range cfg.Routes {
 		if r.Path == "" {
 			return nil, fmt.Errorf("route %d: path is required", i)
 		}
-		if r.BotToken == "" {
-			return nil, fmt.Errorf("route %d (%s): bot_token is required", i, r.Path)
+
+		// Backward compatibility: top-level bot_token/chat_id → telegram provider
+		if r.Provider == "" && (r.BotToken != "" || r.ChatID != "") {
+			cfg.Routes[i].Provider = "telegram"
+			cfg.Routes[i].Telegram = &TelegramConfig{
+				BotToken: r.BotToken,
+				ChatID:   r.ChatID,
+			}
+			cfg.Routes[i].BotToken = ""
+			cfg.Routes[i].ChatID = ""
+			r = cfg.Routes[i]
 		}
-		if r.ChatID == "" {
-			return nil, fmt.Errorf("route %d (%s): chat_id is required", i, r.Path)
+
+		if r.Provider == "" {
+			return nil, fmt.Errorf("route %d (%s): provider is required", i, r.Path)
 		}
+
+		switch r.Provider {
+		case "telegram":
+			if r.Telegram == nil {
+				return nil, fmt.Errorf("route %d (%s): telegram config is required", i, r.Path)
+			}
+			if r.Telegram.BotToken == "" {
+				return nil, fmt.Errorf("route %d (%s): telegram.bot_token is required", i, r.Path)
+			}
+			if r.Telegram.ChatID == "" {
+				return nil, fmt.Errorf("route %d (%s): telegram.chat_id is required", i, r.Path)
+			}
+		case "discord":
+			if r.Discord == nil {
+				return nil, fmt.Errorf("route %d (%s): discord config is required", i, r.Path)
+			}
+			if r.Discord.WebhookURL == "" {
+				return nil, fmt.Errorf("route %d (%s): discord.webhook_url is required", i, r.Path)
+			}
+		default:
+			return nil, fmt.Errorf("route %d (%s): unknown provider %q", i, r.Path, r.Provider)
+		}
+
 		if r.RateLimit == "" {
 			cfg.Routes[i].RateLimit = cfg.Server.RateLimit
 		}
